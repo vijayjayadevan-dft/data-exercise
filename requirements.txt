@@ -1,0 +1,8 @@
+requests
+pyarrow
+pandas
+#pyobdc
+google-auth
+google-cloud-bigquery
+pandas-gbq
+pyspark

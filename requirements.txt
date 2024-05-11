@@ -6,3 +6,5 @@ google-auth
 google-cloud-bigquery
 pandas-gbq
 pyspark
+aws-hadoop
+boto3

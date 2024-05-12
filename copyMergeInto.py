@@ -1,4 +1,5 @@
 # code copied from https://github.com/julian-west/e4ds-snippets/blob/master/pyspark/write_dataframe_to_single_file/copyMergeInto.py
+# modified original code to overwrite stream if output file already exists rather than append
 from typing import List
 
 from py4j.java_gateway import JavaObject
@@ -57,27 +58,9 @@ def copy_merge_into(
     files = get_files(spark, src_dir)
 
     # 2. Set up the 'output stream' for the final merged output file
-    # if destination file already exists, add contents of that file to the output stream
+    # if destination file already exists, overwrite
     if fs.exists(hadoop.fs.Path(dst_file)):
-        tmp_dst_file = dst_file + ".tmp"
-        tmp_in_stream = fs.open(hadoop.fs.Path(dst_file))
-        tmp_out_stream = fs.create(hadoop.fs.Path(tmp_dst_file), True)
-        try:
-            hadoop.io.IOUtils.copyBytes(
-                tmp_in_stream, tmp_out_stream, conf, False
-            )  # False means don't close out_stream
-        finally:
-            tmp_in_stream.close()
-            tmp_out_stream.close()
-
-        tmp_in_stream = fs.open(hadoop.fs.Path(tmp_dst_file))
         out_stream = fs.create(hadoop.fs.Path(dst_file), True)
-        try:
-            hadoop.io.IOUtils.copyBytes(tmp_in_stream, out_stream, conf, False)
-        finally:
-            tmp_in_stream.close()
-            fs.delete(hadoop.fs.Path(tmp_dst_file), False)
-    # if file doesn't already exist, create a new empty file
     else:
         out_stream = fs.create(hadoop.fs.Path(dst_file), False)
 

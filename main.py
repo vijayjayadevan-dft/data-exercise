@@ -1,10 +1,7 @@
-import sys
-import os
 import boto3
-import configparser
 from pyspark.sql import SparkSession, Window
 from pyspark.sql.types import StructType, ArrayType
-from pyspark.sql.functions import explode, explode_outer, col, avg, count, count_if, countDistinct, size, rank, desc, lit
+from pyspark.sql.functions import explode_outer, col, avg, count, count_if, size, rank, desc
 from copyMergeInto import copy_merge_into
 from settings import auto_config as config
 
@@ -136,6 +133,13 @@ def flatten_json(df, col_name):
 
 
 def process_api_data():
+    """Process API data and output reports
+
+    Arguments: 
+
+    Returns:
+        None
+    """
     # create spark session
     spark = create_spark_session(config.PROFILE)
 

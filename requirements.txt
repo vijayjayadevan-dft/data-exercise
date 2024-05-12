@@ -9,3 +9,4 @@ pyspark
 aws-hadoop
 boto3
 DBUtils
+pytest

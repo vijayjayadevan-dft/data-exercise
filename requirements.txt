@@ -8,3 +8,4 @@ pandas-gbq
 pyspark
 aws-hadoop
 boto3
+DBUtils

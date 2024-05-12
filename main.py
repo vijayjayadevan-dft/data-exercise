@@ -5,6 +5,7 @@ import configparser
 from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType,StructField, StringType, IntegerType,BooleanType,DoubleType,ArrayType
 from pyspark.sql.functions import explode, explode_outer, col, count, size
+from copyMergeInto import copy_merge_into
 
 
 config = configparser.ConfigParser()
@@ -13,7 +14,8 @@ config.read('config.cfg')
 def create_spark_session(profile):
     """Create a Spark session to process the data
 
-    Arguments: None
+    Arguments: 
+        profile: AWS/Local profile to use
 
     Returns:
         spark: a Spark session
@@ -22,6 +24,7 @@ def create_spark_session(profile):
         .builder \
         .config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:2.7.0") \
         .getOrCreate()
+    # pass on AWS credentials in sarkcontext (not needed if file is in local environment
     if profile != 'local':
       session = boto3.session.Session(profile_name = profile)
       spark.sparkContext._jsc.hadoopConfiguration().set('fs.s3n.awsAccessKeyId', session.get_credentials().access_key)
@@ -29,6 +32,51 @@ def create_spark_session(profile):
        
     return spark
 
+def read_json_file(spark, filename):
+    """Read json file and return as spark dataframe
+
+    Arguments: 
+        spark: spark session
+        filename: name of file(s)
+
+    Returns:
+        df: dataframe with file contents
+    """
+    df = spark.read.option("multiline","true").json(filename)
+    return df
+
+def process_campaign_data(spark, input_data, output_data, vendor):
+    """Read json file and return as spark dataframe
+
+    Arguments: 
+        spark: spark session
+        input_data: input data folder
+        vendor: name of the vendor
+
+    Returns:
+        none
+    """
+
+    filename = input_data + '/' + vendor + '_' + 'campaign' + '_*.json'
+    df = spark.read.option('multiline','true').json(filename)
+    df.show()
+
+    df_flat = flatten_json(df)
+    df_flat.show()
+
+    campaign_report = df_flat.select(col('id').alias('campaign_id'),
+                             col('details_name').alias('campaign_name'),
+                             size(col("steps")).alias('number_of_steps'),
+                             col('details_schedule').getItem(0).alias('start_date'),
+                             col('details_schedule').getItem(1).alias('end_date'))
+    campaign_report.printSchema()
+    campaign_report.show()
+
+    #write report to csv
+    temp_dir = output_data + '/temp'
+    output_file = output_data + '/campaign_overview.csv'
+    campaign_report.write.mode('overwrite').option('header',True).csv(temp_dir)
+    copy_merge_into(spark, temp_dir, output_file)
 
 
 def main(config_name):
@@ -39,19 +87,25 @@ def main(config_name):
     internal_data = config[config_name]["INTERNAL_DATA"]
     input_data = config[config_name]["INPUT_DATA"]
     output_data = config[config_name]["OUTPUT_DATA"]
+    vendor = config[config_name]["VENDOR"]
+
+    # create spark session
     spark = create_spark_session(profile)
 
-    # Read the JSON file into a DataFrame
-    df = spark.read.option("multiline","true").json(input_data + "/crm_campaign_20230101001500.json")
+    # process campaign list data
+    process_campaign_data(spark, input_data, output_data, vendor)
 
-    df_flat = flatten_json(df)
-    campaign_report = df_flat.select(col('id').alias('campaign_id'),
-                             col('details_name').alias('campaign_name'),
-                             size(col("steps")).alias('number_of_steps'),
-                             col('details_schedule').getItem(0).alias('start_date'),
-                             col('details_schedule').getItem(1).alias('end_date'))
-    campaign_report.printSchema()
-    campaign_report.show()
+    # Read the JSON file into a DataFrame
+    #df = spark.read.option("multiline","true").json(input_data + "/crm_campaign_20230101001500.json")
+
+    #df_flat = flatten_json(df)
+    #campaign_report = df_flat.select(col('id').alias('campaign_id'),
+    #                         col('details_name').alias('campaign_name'),
+    #                         size(col("steps")).alias('number_of_steps'),
+    #                         col('details_schedule').getItem(0).alias('start_date'),
+    #                         col('details_schedule').getItem(1).alias('end_date'))
+    #campaign_report.printSchema()
+    #campaign_report.show()
 
     # Read the JSON file into a DataFrame
     df = spark.read.option("multiline","true").json(input_data + "/crm_engagement_20230101001500.json")

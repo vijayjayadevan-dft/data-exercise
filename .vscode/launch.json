@@ -10,10 +10,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
-            "console": "integratedTerminal",
-            "env":{
-                "CONFIG_PROFILE": "LOCAL",
-            }
+            "console": "integratedTerminal"
         }
     ]
 }

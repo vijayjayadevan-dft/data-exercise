@@ -1,22 +1,34 @@
 import boto3
+import os
+import configparser
 from pyspark.sql import SparkSession, Window
 from pyspark.sql.types import StructType, ArrayType
 from pyspark.sql.functions import explode_outer, col, avg, count, count_if, size, rank, desc
 from copyMergeInto import copy_merge_into
-from settings import auto_config as config
 
 
-def create_spark_session(profile):
+config = configparser.ConfigParser()
+config.read('config.ini')
+
+profile = config['ENV']['profile']
+input_data = config['DATA']['input_data']
+output_data = config['DATA']['output_data']
+internal_data = config['DATA']['input_data']
+temp_dir = config['DATA']['output_data']
+vendor = config['INFO']['vendor']
+
+
+def create_spark_session(env_profile):
     """Create a Spark session to process the data
 
     Arguments: 
-        profile: AWS/Local profile to use
-
+        env_profile: profile to use for getting aws credentials or local env profile
     Returns:
         spark: a Spark session
     """
     spark = SparkSession \
         .builder \
+        .appName("process_crm_data") \
         .config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:2.7.0") \
         .getOrCreate()
     # pass on AWS credentials in sarkcontext (not needed for local environment)
@@ -38,7 +50,7 @@ def get_campaign_list_data(spark):
         campaign overview data dataframe
     """
     # read campaign list files
-    filename = config.INPUT_DATA + '/' + config.VENDOR + '_' + 'campaign' + '_*.json'
+    filename = input_data + '/' + vendor + '_' + 'campaign' + '_*.json'
     df = spark.read.option('multiline','true').json(filename)
 
     # flatten all the struct fields 
@@ -67,7 +79,7 @@ def get_campaign_engagement_data(spark):
         campaign engagement data dataframe
     """
     # read campaign list files
-    filename = config.INPUT_DATA + '/' + config.VENDOR + '_' + 'engagement' + '_*.json'
+    filename = input_data + '/' + vendor + '_' + 'engagement' + '_*.json'
     df = spark.read.option('multiline','true').json(filename)
 
     df_grouped = df.groupBy('campaign','userid').agg(count_if(col('action')  == 'MESSAGE_DELIVERED').alias('messages_delivered'),
@@ -97,7 +109,6 @@ def write_output_report(spark, output_df, output_file):
     Returns:
         None
     """
-    temp_dir = config.TEMP_DATA
     output_df.write.mode('overwrite').option('header',True).csv(temp_dir)
     copy_merge_into(spark, temp_dir, output_file)
 
@@ -141,7 +152,7 @@ def process_api_data():
         None
     """
     # create spark session
-    spark = create_spark_session(config.PROFILE)
+    spark = create_spark_session(profile)
 
     # get campaign list data
     campaign_list_df = get_campaign_list_data(spark)
@@ -150,7 +161,7 @@ def process_api_data():
     user_engagement_df = get_campaign_engagement_data(spark)
 
     # report1 - campaign overview report
-    output_file = config.OUTPUT_DATA + '/campaign_overview.csv'
+    output_file = output_data + '/campaign_overview.csv'
     write_output_report(spark, campaign_list_df, output_file)
 
     #report2 - campaign enegagement report
@@ -164,7 +175,7 @@ def process_api_data():
     engagement_report.printSchema()
     engagement_report.show()
 
-    output_file = config.OUTPUT_DATA + '/current_campaign_engagement_report.csv'
+    output_file = output_data + '/current_campaign_engagement_report.csv'
     write_output_report(spark, engagement_report, output_file)
 
 process_api_data()

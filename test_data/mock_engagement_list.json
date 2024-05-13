@@ -1,0 +1,10 @@
+[
+    {"campaign": "campaign1", "userid": "user1", "action": "MESSAGE_DELIVERED"},
+    {"campaign": "campaign1", "userid": "user1", "action": "MESSAGE_OPENED"},
+    {"campaign": "campaign1", "userid": "user2", "action": "MESSAGE_DELIVERED"},
+    {"campaign": "campaign1", "userid": "user2", "action": "DELIVERY_FAILED"},
+    {"campaign": "campaign2", "userid": "user3", "action": "MESSAGE_DELIVERED"},
+    {"campaign": "campaign2", "userid": "user3", "action": "MESSAGE_OPENED"},
+    {"campaign": "campaign2", "userid": "user4", "action": "MESSAGE_DELIVERED"},
+    {"campaign": "campaign2", "userid": "user4", "action": "MESSAGE_OPENED"}
+]

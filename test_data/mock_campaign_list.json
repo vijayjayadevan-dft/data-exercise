@@ -1,0 +1,43 @@
+[
+    {
+    "id": "campaign1",
+    "details": {
+    "name": "Campaign A",
+    "schedule": [
+    "2023-10-10",
+    "2023-10-31"
+    ]
+    },
+    "steps": [
+    {
+    "templateId": "abc"
+    },
+    {
+    "templateId": "cde"
+    }
+    ]
+    },
+    {
+    "id": "campaign2",
+    "details": {
+    "name": "Campaign B",
+    "schedule": [
+    "2023-08-15",
+    "2023-09-25"]
+    },
+    "steps": [
+    {
+    "templateId": "123"
+    },
+    {
+    "templateId": "345"
+    },
+    {
+    "templateId": "567"
+    },
+    {
+    "templateId": "789"
+    }
+    ]
+    }
+]

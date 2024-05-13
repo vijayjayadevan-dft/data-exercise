@@ -2,9 +2,8 @@ import boto3
 import os
 import configparser
 from pyspark.sql import SparkSession, Window
-from pyspark.sql.types import StructType, ArrayType
+from pyspark.sql.types import StructType, ArrayType, StructField, StringType, FloatType
 from pyspark.sql.functions import explode_outer, col, avg, count, count_if, size, rank, desc
-from copyMergeInto import copy_merge_into
 import logging
 import gzip
 
@@ -52,17 +51,17 @@ def create_spark_session(env_profile):
     return spark
 
 
-def get_campaign_list_data(spark):
+def get_campaign_list_data(spark, filename):
     """process campaign list data from API and return campaign overview data
 
     Arguments: 
         spark: spark session
+        filename: filename of the campaign list data
 
     Returns:
         campaign overview data dataframe
     """
     # read campaign list files
-    filename = input_data + '/' + vendor + '_' + 'campaign' + '_' + file_time_stamp +'*.json'
     try:
       campaign_list_df = spark.read.option('multiline','true').json(filename)
     except Exception as e:
@@ -85,17 +84,16 @@ def get_campaign_list_data(spark):
     return campaign_data
 
 
-def get_campaign_engagement_data(spark):
+def get_campaign_engagement_data(spark, filename):
     """process user engagement data from API and return campaign engagement data
 
     Arguments: 
         spark: spark session
-
+        filename: filename of the campaign engagement data
     Returns:
         campaign engagement data dataframe
     """
     # read campaign list files
-    filename = input_data + '/' + vendor + '_' + 'engagement' + '_' + file_time_stamp +'*.json'
     try:
       engagement_list_df = spark.read.option('multiline','true').json(filename)
     except Exception as e:
@@ -141,9 +139,14 @@ def write_output_report(spark, output_df, output_file):
 
         # Merge all part files into a single compressed file
         with gzip.open(output_file, 'wb') as outfile:
+            is_first_file = True
             for filename in os.listdir(temp_dir):
                 if filename.endswith('.csv'):
-                    with open(os.path.join(temp_dir, filename), 'rb') as infile:
+                    with open(os.path.join(temp_dir, filename), 'rb') as infile:                        
+                        # Skip the header row if it's not the first file
+                        if not is_first_file:
+                            next(infile)
+                        is_first_file = False
                         outfile.write(infile.read())
 
         # Clean up temporary files
@@ -203,20 +206,22 @@ def process_api_data():
 
     # get campaign list data
     try:
-      campaign_list_df = get_campaign_list_data(spark)
+      filename = input_data + '/' + vendor + '_' + 'campaign' + '_' + file_time_stamp +'*.json'
+      campaign_list_df = get_campaign_list_data(spark, filename)
     except Exception as e:
       logging.error(f"Error getting campaign list data: {e}")
       raise e
 
     # process user engagement data
     try:
-      user_engagement_df = get_campaign_engagement_data(spark)
+      filename = input_data + '/' + vendor + '_' + 'engagement' + '_' + file_time_stamp +'*.json'
+      user_engagement_df = get_campaign_engagement_data(spark, filename)
     except Exception as e:
       logging.error(f"Error getting campaign engagement data: {e}")
       raise e
 
     # report1 - campaign overview report
-    output_file = output_data + '/campaign_overview.csv'
+    output_file = output_data + '/campaign_overview_report.csv.gzip'
     try:
       write_output_report(spark, campaign_list_df, output_file)
     except Exception as e:
@@ -236,7 +241,7 @@ def process_api_data():
       logging.error(f"Error processing campaign engagement data: {e}")
       raise e
 
-    output_file = output_data + '/current_campaign_engagement_report.csv'
+    output_file = output_data + '/current_campaign_engagement_report.csv.gzip'
     try:
       write_output_report(spark, engagement_report, output_file)
     except Exception as e:

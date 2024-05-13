@@ -1,10 +1,11 @@
 import pytest
 from unittest.mock import patch
-from main import create_spark_session, flatten_json, write_output_report
-import os
-from pyspark.sql.types import StructType, StructField, IntegerType, StringType, ArrayType, FloatType
+from main import create_spark_session, flatten_json, write_output_report, get_campaign_engagement_data, get_campaign_list_data, process_api_data
+from pyspark.sql.types import StructType, StructField, IntegerType, StringType, ArrayType, FloatType, DoubleType, LongType
 from pyspark.sql import SparkSession,SQLContext
-
+from pyspark.testing import assertDataFrameEqual
+import gzip
+import os
 
 
 @pytest.fixture
@@ -102,23 +103,129 @@ def mock_output_df(spark_session):
         StructField("average_percent_completion", FloatType(), True),
     ])
     output_df = spark_session.createDataFrame(output_data, schema)
+    output_df = output_df.orderBy("campaign_name")
     return output_df
 
 @pytest.fixture
 def mock_output_file():
     """Mock output file path for testing."""
-    return "test_data/mock_output_file.csv"
+    return "test_data/mock_output_file.csv.gzip"
 
 def test_write_output_report(spark_session, mock_output_df, mock_output_file):
     """Test the `write_output_report` function with mock data and content validation."""
     write_output_report(spark_session, mock_output_df, mock_output_file)
 
     # Verify that the output file was created and contains the expected content.
-    with open(mock_output_file, 'r') as f:
-        lines = f.readlines()
-        assert lines[0] == "campaign_name,average_percent_completion\n"
-        assert lines[1] == "Campaign A,0.5\n"
-        assert lines[2] == "Campaign B,1.0\n"
+    with gzip.open(mock_output_file, 'rb') as infile:
+        lines = infile.readlines()
+        assert lines[0] == b'campaign_name,average_percent_completion\n'
+        assert lines[1] == b'Campaign A,0.5\n'
+        assert lines[2] == b'Campaign B,1.0\n'
 
     # Clean up the temporary file.
     os.remove(mock_output_file)
+
+
+@pytest.fixture
+def mock_expected_campaign_engagement_df(spark_session):
+    """Mock expected campaign engagement data for testing."""
+    expected_campaign_engagement = [
+    {"campaign": "campaign1", "num_of_users": 2, "num_of_active_users": 1, "average_percent_completion": 0.5},
+    {"campaign": "campaign2", "num_of_users": 2, "num_of_active_users": 2, "average_percent_completion": 1.0},
+    ]
+    schema = StructType([
+        StructField("campaign", StringType(), True),
+        StructField("num_of_users", LongType(), True),
+        StructField("num_of_active_users", LongType(), True),
+        StructField("average_percent_completion", DoubleType(), True),
+      ])
+    output_df = spark_session.createDataFrame(expected_campaign_engagement, schema)
+    output_df = output_df.orderBy("campaign")
+    return output_df
+
+@pytest.fixture
+def mock_engagement_list_file():
+    """Mock engagement list file path for testing."""
+    return 'test_data/mock_engagement_list.json'
+
+def test_get_campaign_engagement_data(spark_session, mock_engagement_list_file, mock_expected_campaign_engagement_df):
+    """Test get_campaign_engagement_data function with mock data."""
+    # Call the function with mocked data
+    result_df = get_campaign_engagement_data(spark_session, mock_engagement_list_file)
+    result_df = result_df.orderBy("campaign")
+    # Assert that the result matches the expected output
+    assertDataFrameEqual(result_df, mock_expected_campaign_engagement_df)
+    #assert result_df == mock_expected_campaign_engagement_df
+
+
+
+@pytest.fixture
+def mock_expected_campaign_list_df(spark_session):
+    """Mock expected campaign list data for testing."""
+    expected_campaign_list = [
+        {"campaign_id": "campaign1", "campaign_name": "Campaign A", "number_of_steps": 2, "start_date": "2023-10-10", "end_date": "2023-10-31"},
+        {"campaign_id": "campaign2", "campaign_name": "Campaign B", "number_of_steps": 4, "start_date": "2023-08-15", "end_date": "2023-09-25"},
+    ]
+    schema = StructType([
+        StructField("campaign_id", StringType(), True),
+        StructField("campaign_name", StringType(), True),
+        StructField("number_of_steps", IntegerType(), True),
+        StructField("start_date", StringType(), True),
+        StructField("end_date", StringType(), True),
+      ])
+    output_df = spark_session.createDataFrame(expected_campaign_list, schema)
+    output_df = output_df.orderBy("campaign_id")
+    return output_df
+
+@pytest.fixture
+def mock_campaign_list_file():
+    """Mock campaign list file path for testing."""
+    return 'test_data/mock_campaign_list.json'
+
+# Test get_campaign_list_data with mock data
+def test_get_campaign_list_data(spark_session, mock_campaign_list_file, mock_expected_campaign_list_df):
+    """Test test_get_campaign_list_data function with mock data."""
+    # Call the function with the mock DataFrame
+    result_df = get_campaign_list_data(spark_session, mock_campaign_list_file)
+    result_df = result_df.orderBy("campaign_id")
+    # Assert that the result matches the expected output
+    assertDataFrameEqual(result_df, mock_expected_campaign_list_df)
+
+
+@pytest.fixture
+def mock_output_campaign_overview_report():
+    """Mock output campaign overview report path for testing."""
+    return "data/output/reports/campaign_overview_report.csv.gzip"
+
+@pytest.fixture
+def mock_output_campaign_engagement_report():
+    """Mock output campaign engagement report path for testing."""
+    return "data/output/reports/current_campaign_engagement_report.csv.gzip"
+
+# Test process_api_data with preview data
+def test_process_api_data(mock_output_campaign_overview_report, mock_output_campaign_engagement_report):
+    """Test process_api_data function."""
+
+    # Clean up the existing output files
+    if os.path.exists(mock_output_campaign_overview_report):
+        os.remove(mock_output_campaign_overview_report)
+    if os.path.exists(mock_output_campaign_engagement_report):
+        os.remove(mock_output_campaign_engagement_report)
+
+    # Call the function with the mock DataFrame
+    process_api_data()
+
+    # Verify that the campaign_overview report contains the expected content.
+    with gzip.open(mock_output_campaign_overview_report, 'rb') as infile:
+        lines = infile.readlines()
+        assert lines[0] == b'campaign_id,campaign_name,number_of_steps,start_date,end_date\n'
+        assert lines[1] == b'6fg7e8,summer_romance_binge,4,2023-07-21,2023-07-31\n'
+        assert lines[2] == b'cb571,win_back,3,2023-07-01,2023-07-25\n'
+
+    # Verify that the campaign_engagement report contains the expected content.
+    with gzip.open(mock_output_campaign_engagement_report, 'rb') as infile:
+        lines = infile.readlines()
+        assert lines[0] == b'campaign_name,average_percent_completion,rank\n'
+        assert lines[1] == b'summer_romance_binge,0.4,1\n'
+        assert lines[2] == b'win_back,0.0,2\n'
+

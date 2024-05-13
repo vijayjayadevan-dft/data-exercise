@@ -6,6 +6,7 @@ from pyspark.sql.types import StructType, ArrayType
 from pyspark.sql.functions import explode_outer, col, avg, count, count_if, size, rank, desc
 from copyMergeInto import copy_merge_into
 import logging
+import gzip
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -135,11 +136,24 @@ def write_output_report(spark, output_df, output_file):
         None
     """
     try:
-      output_df.write.mode('overwrite').option('header',True).csv(temp_dir)
-      copy_merge_into(spark, temp_dir, output_file)
+        # Write each partition to a separate file
+        output_df.write.mode('overwrite').option('header', True).csv(temp_dir)
+
+        # Merge all part files into a single compressed file
+        with gzip.open(output_file, 'wb') as outfile:
+            for filename in os.listdir(temp_dir):
+                if filename.endswith('.csv'):
+                    with open(os.path.join(temp_dir, filename), 'rb') as infile:
+                        outfile.write(infile.read())
+
+        # Clean up temporary files
+        for filename in os.listdir(temp_dir):
+            if filename.endswith('.csv'):
+                os.remove(os.path.join(temp_dir, filename))
+
     except Exception as e:
-      logging.error(f"Error writing output report: {e}")
-      raise e
+        logging.error(f"Error writing output report: {e}")
+        raise e
 
 
 def flatten_json(df, col_name):

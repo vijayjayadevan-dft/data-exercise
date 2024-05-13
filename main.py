@@ -39,9 +39,9 @@ def create_spark_session(env_profile):
         .getOrCreate()
     
     # pass on AWS credentials in sarkcontext (not needed for local environment)
-    if profile != 'local':
+    if env_profile != 'local':
       try:
-        session = boto3.session.Session(profile_name = profile)
+        session = boto3.session.Session(profile_name = env_profile)
         spark.sparkContext._jsc.hadoopConfiguration().set('fs.s3n.awsAccessKeyId', session.get_credentials().access_key)
         spark.sparkContext._jsc.hadoopConfiguration().set('fs.s3n.awsSecretAccessKey', session.get_credentials().secret_key)
       except Exception as e:

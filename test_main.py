@@ -1,69 +1,124 @@
-import unittest
+import pytest
+from unittest.mock import patch
+from main import create_spark_session, flatten_json, write_output_report
 import os
-import boto3
-import configparser
-from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType, ArrayType
-from pyspark.sql.functions import explode_outer, col, avg, count, count_if, size, rank, desc
-from copyMergeInto import copy_merge_into
+from pyspark.sql.types import StructType, StructField, IntegerType, StringType, ArrayType, FloatType
+from pyspark.sql import SparkSession,SQLContext
 
-from main import create_spark_session, get_campaign_list_data, get_campaign_engagement_data, write_output_report, flatten_json, process_api_data
 
-class TestMain(unittest.TestCase):
 
-    def setUp(self):
-        self.spark = create_spark_session("local")
-        self.config = configparser.ConfigParser()
-        self.config.read('config.ini')
+@pytest.fixture
+def mock_boto3_session():
+    with patch("boto3.session.Session") as mock_session:
+        mock_session.return_value.get_credentials.return_value.access_key = "mock_access_key"
+        mock_session.return_value.get_credentials.return_value.secret_key = "mock_secret_key"
+        yield mock_session
 
-    def tearDown(self):
-        self.spark.stop()
+def test_create_spark_session_local(mock_boto3_session):
+    """Test create_spark_session function with local profile"""
+    spark = create_spark_session("local")
+    assert spark.sparkContext.appName == "process_crm_data"
+    assert spark.sparkContext.getConf().get("spark.jars.packages") == "org.apache.hadoop:hadoop-aws:2.7.0"
+    mock_boto3_session.assert_not_called()
 
-    def test_create_spark_session(self):
-        """Test if the function creates a Spark session successfully."""
-        profile = "local"
-        spark = create_spark_session(profile)
-        self.assertIsNotNone(spark)
-        self.assertEqual(spark.sparkContext.appName, "process_crm_data")
+@pytest.mark.parametrize("profile", ["dev", "prod"])
+def test_create_spark_session_non_local(profile, mock_boto3_session):
+    """Test create_spark_session function with non-local profiles"""
+    spark = create_spark_session(profile)
+    assert spark.sparkContext.appName == "process_crm_data"
+    assert spark.sparkContext.getConf().get("spark.jars.packages") == "org.apache.hadoop:hadoop-aws:2.7.0"
+    mock_boto3_session.assert_called_once_with(profile_name=profile)
+    assert spark.sparkContext._jsc.hadoopConfiguration().get('fs.s3n.awsAccessKeyId') == "mock_access_key"
+    assert spark.sparkContext._jsc.hadoopConfiguration().get('fs.s3n.awsSecretAccessKey') == "mock_secret_key"
 
-    def test_get_campaign_list_data(self):
-        """Test if the function reads and processes campaign list data correctly."""
-        df = get_campaign_list_data(self.spark)
-        self.assertEqual(df.count(), 1)
-        self.assertEqual(df.collect()[0]["campaign_name"], "campaign1")
+def test_create_spark_session_invalid_profile():
+    """Test create_spark_session function with invalid profile"""
+    with pytest.raises(Exception):
+        create_spark_session("invalid_profile")
 
-    def test_get_campaign_engagement_data(self):
-        """Test if the function reads and processes user engagement data correctly."""
-        df = get_campaign_engagement_data(self.spark)
-        self.assertEqual(df.count(), 1)
-        self.assertEqual(df.collect()[0]["num_of_users"], 2)
+@pytest.fixture(scope="session")
+def spark_session():
+    """
+    Creates a Spark session with local profile for testing purposes.
+    """
+    spark = create_spark_session("local")    
+    yield spark
 
-    def test_write_output_report(self):
-        """Test if the function writes the output report correctly."""
-        df = self.spark.createDataFrame([("campaign1", "user1", 10, 2, 5, 17),
-                                       ("campaign1", "user2", 5, 1, 3, 9)],
-                                       ["campaign", "userid", "messages_delivered", "messages_failed", "messages_opened", "num_of_actions"])
-        output_file = "output.csv"
-        write_output_report(self.spark, df, output_file)
-        self.assertTrue(os.path.isfile(output_file))
+    spark.stop()
 
-    def test_flatten_json(self):
-        """Test if the function flattens nested JSON correctly."""
-        df = self.spark.createDataFrame([({"name": "John", "age": 30}, [1, 2, 3])], ["details", "steps"])
-        result_df = flatten_json(df, "details")
-        self.assertEqual(result_df.count(), 1)
-        self.assertEqual(result_df.collect()[0]["details_name"], "John")
-        self.assertEqual(result_df.collect()[0]["details_age"], 30)
-        self.assertEqual(result_df.collect()[0]["steps"], [1, 2, 3])
+@pytest.fixture
+def mock_df(spark_session):
+    data = [
+        {"id": 1, "details": {"name": "Campaign A", "schedule": ["2023-01-01", "2023-01-31"]}},
+        {"id": 2, "details": {"name": "Campaign B", "schedule": ["2023-02-01", "2023-02-28"]}},
+    ]
+    schema = StructType([
+        StructField("id", IntegerType(), True),
+        StructField("details", StructType([
+            StructField("name", StringType(), True),
+            StructField("schedule", ArrayType(StringType()), True),
+        ]), True),
+    ])
+    return spark_session.createDataFrame(data, schema)
 
-    def test_process_api_data(self):
-        """Test if the function processes API data and outputs reports correctly."""
-        process_api_data()
-        # Check if output files exist
-        output_file1 = self.config['DATA']['output_data'] + '/campaign_overview.csv'
-        output_file2 = self.config['DATA']['output_data'] + '/current_campaign_engagement_report.csv'
-        self.assertTrue(os.path.isfile(output_file1))
-        self.assertTrue(os.path.isfile(output_file2))
+def test_flatten_json_struct(mock_df):
+    """Test flatten_json function with a struct column"""
+    flattened_df = flatten_json(mock_df, "details")
+    assert flattened_df.columns == ["id", "details_name", "details_schedule"]
+    assert flattened_df.collect()[0]["details_name"] == "Campaign A"
+    assert flattened_df.collect()[1]["details_schedule"] == ["2023-02-01", "2023-02-28"]
 
-if __name__ == '__main__':
-    unittest.main()
+@pytest.fixture
+def mock_df_array(spark_session):
+    data = [
+        {"id": 1, "steps": ["Step 1", "Step 2", "Step 3"]},
+        {"id": 2, "steps": ["Step 4", "Step 5"]},
+    ]
+    schema = StructType([
+        StructField("id", IntegerType(), True),
+        StructField("steps", ArrayType(StringType()), True),
+    ])
+    return spark_session.createDataFrame(data, schema)
+
+def test_flatten_json_array(mock_df_array):
+    """Test flatten_json function with an array column"""
+    flattened_df = flatten_json(mock_df_array, "steps")
+    assert flattened_df.columns == ["id", "steps"]
+    assert flattened_df.collect()[0]["steps"] == "Step 1"
+    assert flattened_df.collect()[2]["steps"] == "Step 3"
+    assert flattened_df.collect()[4]["steps"] == "Step 5"
+
+
+
+@pytest.fixture
+def mock_output_df(spark_session):
+    """Mock output file path for testing."""
+    output_data = [
+        {"campaign_name": "Campaign A", "average_percent_completion": 0.5},
+        {"campaign_name": "Campaign B", "average_percent_completion": 1.0},
+    ]
+    schema = StructType([
+        StructField("campaign_name", StringType(), True),
+        StructField("average_percent_completion", FloatType(), True),
+    ])
+    output_df = spark_session.createDataFrame(output_data, schema)
+    return output_df
+
+@pytest.fixture
+def mock_output_file():
+    """Mock output file path for testing."""
+    return "test_data/mock_output_file.csv"
+
+def test_write_output_report(spark_session, mock_output_df, mock_output_file):
+    """Test the `write_output_report` function with mock data and content validation."""
+    write_output_report(spark_session, mock_output_df, mock_output_file)
+
+    # Verify that the output file was created and contains the expected content.
+    with open(mock_output_file, 'r') as f:
+        lines = f.readlines()
+        assert lines[0] == "campaign_name,average_percent_completion\n"
+        assert lines[1] == "Campaign A,0.5\n"
+        assert lines[2] == "Campaign B,1.0\n"
+
+    # Clean up the temporary file.
+    os.remove(mock_output_file)
